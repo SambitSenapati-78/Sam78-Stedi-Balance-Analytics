@@ -1,0 +1,51 @@
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from awsgluedq.transforms import EvaluateDataQuality
+from awsglue import DynamicFrame
+
+def sparkSqlQuery(glueContext, query, mapping, transformation_ctx) -> DynamicFrame:
+    for alias, frame in mapping.items():
+        frame.toDF().createOrReplaceTempView(alias)
+    result = spark.sql(query)
+    return DynamicFrame.fromDF(result, glueContext, transformation_ctx)
+args = getResolvedOptions(sys.argv, ['JOB_NAME'])
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+# Default ruleset used by all target nodes with data quality enabled
+DEFAULT_DATA_QUALITY_RULESET = """
+    Rules = [
+        ColumnCount > 0
+    ]
+"""
+
+# Script generated for node Customer Trusted
+CustomerTrusted_node1758700810899 = glueContext.create_dynamic_frame.from_catalog(database="stedi", table_name="customer_trusted", transformation_ctx="CustomerTrusted_node1758700810899")
+
+# Script generated for node Accelerometer Landing
+AccelerometerLanding_node1758700794431 = glueContext.create_dynamic_frame.from_catalog(database="stedi", table_name="accelerometer_landing", transformation_ctx="AccelerometerLanding_node1758700794431")
+
+# Script generated for node Join
+Join_node1758700888268 = Join.apply(frame1=AccelerometerLanding_node1758700794431, frame2=CustomerTrusted_node1758700810899, keys1=["user"], keys2=["email"], transformation_ctx="Join_node1758700888268")
+
+# Script generated for node Drop Fields And Duplicates
+SqlQuery0 = '''
+select distinct customername, email, phone, birthday, serialnumber, registrationdate, lastupdatedate, sharewithresearchasofdate, sharewithpublicasofdate,sharewithfriendsasofdate from myDataSource
+
+'''
+DropFieldsAndDuplicates_node1758704111093 = sparkSqlQuery(glueContext, query = SqlQuery0, mapping = {"myDataSource":Join_node1758700888268}, transformation_ctx = "DropFieldsAndDuplicates_node1758704111093")
+
+# Script generated for node Customer Curated
+EvaluateDataQuality().process_rows(frame=DropFieldsAndDuplicates_node1758704111093, ruleset=DEFAULT_DATA_QUALITY_RULESET, publishing_options={"dataQualityEvaluationContext": "EvaluateDataQuality_node1758700764636", "enableDataQualityResultsPublishing": True}, additional_options={"dataQualityResultsPublishing.strategy": "BEST_EFFORT", "observations.scope": "ALL"})
+CustomerCurated_node1758701269289 = glueContext.getSink(path="s3://samproj78/customer/curated/", connection_type="s3", updateBehavior="UPDATE_IN_DATABASE", partitionKeys=[], enableUpdateCatalog=True, transformation_ctx="CustomerCurated_node1758701269289")
+CustomerCurated_node1758701269289.setCatalogInfo(catalogDatabase="stedi",catalogTableName="customer_curated")
+CustomerCurated_node1758701269289.setFormat("json")
+CustomerCurated_node1758701269289.writeFrame(DropFieldsAndDuplicates_node1758704111093)
+job.commit()
